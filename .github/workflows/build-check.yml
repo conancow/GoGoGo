@@ -1,4 +1,4 @@
-name: Android Build Check
+name: Debug Build Failure
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       - master
 
 jobs:
-  build:
+  debug-build:
     runs-on: ubuntu-latest
     
     steps:
@@ -37,18 +37,49 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       
-      - name: Clean and build
-        run: |
-          ./gradlew --stop || true
-          ./gradlew clean
-          ./gradlew build --no-daemon --stacktrace --no-configuration-cache
+      # 停止所有 Gradle daemon
+      - name: Stop Gradle daemons
+        run: ./gradlew --stop || true
       
-      - name: Upload build reports
+      # 清理项目
+      - name: Clean project
+        run: ./gradlew clean --no-daemon
+      
+      # 1. 首先尝试获取依赖树，检查依赖问题
+      - name: Check dependencies
+        run: ./gradlew app:dependencies --no-daemon --configuration debugCompileClasspath || true
+      
+      # 2. 尝试编译代码（不打包资源）
+      - name: Compile Java code
+        run: ./gradlew compileDebugJavaWithJavac --no-daemon --stacktrace --info || true
+      
+      # 3. 检查资源
+      - name: Check resources
+        run: ./gradlew processDebugResources --no-daemon --stacktrace --info || true
+      
+      # 4. 运行 lint 检查
+      - name: Run lint
+        run: ./gradlew lintDebug --no-daemon --continue || true
+      
+      # 5. 尝试分模块构建
+      - name: Build individual modules
+        run: |
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace --info || true
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace --info || true
+      
+      # 6. 最后尝试完整构建并捕获详细输出
+      - name: Full build with detailed output
+        run: |
+          ./gradlew build --no-daemon --stacktrace --info --scan 2>&1 | tee build.log
+        continue-on-error: true
+      
+      # 上传所有日志和报告
+      - name: Upload all logs and reports
         uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: build-failure-reports
+          name: full-debug-logs
           path: |
-            **/build/reports/
-            **/build/android-profile/
+            **/build/
+            build.log
           retention-days: 30
