@@ -16,40 +16,58 @@ on:
 
 # 一个 workflow 执行一个或多个 job，这些 job 被组织在 jobs 字段下
 jobs:
-  # 一个名为 build 的 job。每一个Job都是并发执行的并不是按照申明的先后顺序执行的，
-  # 如果多个job 之间存在依赖关系，需要使用 needs，例如
-  # job1:
-  #   xxx
-  # job2:
-  #   needs: job1
-  #   xxx
+  # 一个名为 build 的 job
   build:
     # 该 job 运行的系统环境，支持 ubuntu 、windows、macOS
     runs-on: ubuntu-latest
     
-    # 该 job 的一系列步骤。每个以“-”开头
+    # 该 job 的一系列步骤。每个以"-"开头
     steps:
       # 检出我们的源代码
-      - uses: actions/checkout@v5
-
+      - uses: actions/checkout@v4
+      
       # 设置 JDK
-      - name: set up JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'adopt'
+          distribution: 'temurin'  # 推荐使用 temurin 替代 adopt
           cache: gradle
-      # 创建 local.properties 文件
+      
+      # 配置 Gradle 缓存
+      - name: Gradle Caching
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      # 创建 local.properties 文件（确认是否需要放在项目根目录）
       - name: Create local.properties
         run: |
+          # 假设文件需要放在项目根目录
           cat << EOF > local.properties
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
           EOF
+      
       # 给 gradlew 增加执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       
-      # 启动构建
+      # 启动构建（添加优化参数）
       - name: Build with Gradle
-        run: ./gradlew build
+        run: ./gradlew build --no-daemon --stacktrace
+      
+      # 可选：上传构建产物
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            **/build/outputs/
+            **/build/libs/
+          retention-days: 7
