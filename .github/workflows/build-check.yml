@@ -1,40 +1,28 @@
-# name 字段用于指定 Workflow 的名字
-name: Build Check
+name: Build Check with Debug
 
-# 在 on 字段下列举触发条件（事件），可以有多种
 on:
-  # 手动使用 Github WebUI 触发
   workflow_dispatch:
-  # 仓库收到 Push 时触发
   push:
     branches:
       - master
-  # 仓库收到 pull_request 时触发
   pull_request:
     branches:
       - master
 
-# 一个 workflow 执行一个或多个 job，这些 job 被组织在 jobs 字段下
 jobs:
-  # 一个名为 build 的 job
   build:
-    # 该 job 运行的系统环境，支持 ubuntu 、windows、macOS
     runs-on: ubuntu-latest
     
-    # 该 job 的一系列步骤。每个以"-"开头
     steps:
-      # 检出我们的源代码
       - uses: actions/checkout@v4
       
-      # 设置 JDK
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin'  # 推荐使用 temurin 替代 adopt
+          distribution: 'temurin'
           cache: gradle
       
-      # 配置 Gradle 缓存
       - name: Gradle Caching
         uses: actions/cache@v3
         with:
@@ -45,29 +33,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
       
-      # 创建 local.properties 文件（确认是否需要放在项目根目录）
       - name: Create local.properties
         run: |
-          # 假设文件需要放在项目根目录
           cat << EOF > local.properties
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
           EOF
       
-      # 给 gradlew 增加执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       
-      # 启动构建（添加优化参数）
-      - name: Build with Gradle
-        run: ./gradlew build --no-daemon --stacktrace
+      # 显示 Gradle 版本和任务
+      - name: List Gradle tasks
+        run: ./gradlew tasks --no-daemon
       
-      # 可选：上传构建产物
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            **/build/outputs/
-            **/build/libs/
-          retention-days: 7
+      # 尝试编译
+      - name: Try to compile
+        run: ./gradlew compileDebugJavaWithJavac --no-daemon --stacktrace
+        continue-on-error: true
+      
+      # 运行测试（会暴露具体失败原因）
+      - name: Run tests
+        run: ./gradlew test --no-daemon --stacktrace --info
+      
+      # 如果测试通过，再尝试完整构建
+      - name: Full build
+        if: success()
+        run: ./gradlew build --no-daemon --stacktrace
