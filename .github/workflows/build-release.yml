@@ -24,6 +24,10 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      # 添加 Android SDK 设置
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -31,20 +35,57 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
-      - name: Get Tag
-        id: var
-        run: echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Create local.properties
         run: |
           cat << EOF > local.properties
+          sdk.dir=/usr/local/lib/android/sdk
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
           EOF
 
-      - name: Build APK
-        run: bash ./gradlew assembleRelease
+      # 先尝试清理构建
+      - name: Clean project
+        run: bash ./gradlew clean --no-daemon
+
+      # 添加 Gradle 属性检查
+      - name: Check Gradle properties
+        run: |
+          if [ -f "gradle.properties" ]; then
+            echo "=== gradle.properties ==="
+            cat gradle.properties
+          fi
+          
+          if [ -f "local.properties" ]; then
+            echo "=== local.properties ==="
+            # 隐藏敏感信息
+            sed 's/MAPS_API_KEY=.*/MAPS_API_KEY=***/' local.properties | sed 's/MAPS_SAFE_CODE=.*/MAPS_SAFE_CODE=***/'
+          fi
+
+      # 分步构建，便于调试
+      - name: Build Debug first (for testing)
+        run: |
+          bash ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Build Release APK
+        run: |
+          bash ./gradlew assembleRelease --stacktrace --no-daemon --info
+
+      # 如果构建失败，显示详细错误
+      - name: Check build results
+        if: failure()
+        run: |
+          echo "=== Build failed, checking reports ==="
+          find . -name "problems-report.html" -exec echo "Found: {}" \;
+          find . -name "*.log" -exec echo "Log file: {}" \;
+          
+          # 尝试查看问题报告
+          if [ -f "build/reports/problems/problems-report.html" ]; then
+            echo "=== Problems Report Content ==="
+            cat build/reports/problems/problems-report.html
+          fi
 
       - name: Get Build Tool Version
         run: |
@@ -73,7 +114,22 @@ jobs:
         id: changelog
         with:
           github-token: ${{ github.token }}
-          # ... 你的 changelog 配置保持不变
+          commit-types: |
+            feat: New Features
+            fix: Bug Fixes
+            build: Build System & Dependencies
+            perf: Performance Improvements
+            docs: Documentation
+            test: Tests
+            refactor: Refactors
+            chore: Chores
+            ci: CI
+            style: Code Style
+            revert: Reverts
+          default-commit-type: Other Changes
+          mention-authors: true
+          mention-new-contributors: true
+          include-compare-link: true
 
       - name: Release APK
         uses: softprops/action-gh-release@v2.3.2
