@@ -24,7 +24,6 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # 添加 Android SDK 设置
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -38,6 +37,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # 修复：正确创建 local.properties 文件
       - name: Create local.properties
         run: |
           cat << EOF > local.properties
@@ -45,51 +45,46 @@ jobs:
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
           EOF
+          
+          # 验证文件内容（隐藏敏感信息）
+          echo "=== local.properties 内容验证 ==="
+          echo "sdk.dir: $(grep 'sdk.dir' local.properties)"
+          echo "MAPS_API_KEY: 已设置"
+          echo "MAPS_SAFE_CODE: 已设置"
 
-      # 先尝试清理构建
+      # 添加：检查 secrets 插件配置
+      - name: Check Secrets Plugin Configuration
+        run: |
+          if [ -f "app/build.gradle" ]; then
+            echo "=== Secrets Plugin 配置检查 ==="
+            grep -A 10 -B 10 "secrets-gradle-plugin" app/build.gradle || echo "未找到 secrets plugin 配置"
+          fi
+          
+          # 检查项目级的 secrets 配置
+          if [ -f "build.gradle" ]; then
+            echo "=== 项目级 build.gradle ==="
+            grep -A 5 -B 5 "secrets" build.gradle || echo "未找到项目级 secrets 配置"
+          fi
+
+      # 先清理构建
       - name: Clean project
         run: bash ./gradlew clean --no-daemon
 
-      # 添加 Gradle 属性检查
-      - name: Check Gradle properties
-        run: |
-          if [ -f "gradle.properties" ]; then
-            echo "=== gradle.properties ==="
-            cat gradle.properties
-          fi
-          
-          if [ -f "local.properties" ]; then
-            echo "=== local.properties ==="
-            # 隐藏敏感信息
-            sed 's/MAPS_API_KEY=.*/MAPS_API_KEY=***/' local.properties | sed 's/MAPS_SAFE_CODE=.*/MAPS_SAFE_CODE=***/'
-          fi
-
-      # 分步构建，便于调试
-      - name: Build Debug first (for testing)
-        run: |
-          bash ./gradlew assembleDebug --stacktrace --no-daemon
-
+      # 构建时添加详细日志
       - name: Build Release APK
         run: |
           bash ./gradlew assembleRelease --stacktrace --no-daemon --info
 
-      # 如果构建失败，显示详细错误
-      - name: Check build results
-        if: failure()
-        run: |
-          echo "=== Build failed, checking reports ==="
-          find . -name "problems-report.html" -exec echo "Found: {}" \;
-          find . -name "*.log" -exec echo "Log file: {}" \;
-          
-          # 尝试查看问题报告
-          if [ -f "build/reports/problems/problems-report.html" ]; then
-            echo "=== Problems Report Content ==="
-            cat build/reports/problems/problems-report.html
-          fi
-
       - name: Get Build Tool Version
         run: |
           echo "BUILD_TOOL_VERSION=$(ls -1 /usr/local/lib/android/sdk/build-tools | sort -V | tail -n1)" >> $GITHUB_ENV
+
+      # 注意：签名配置需要调整，因为你的 keystore 文件不在 CI 环境中
+      - name: Setup Signing
+        run: |
+          # 创建 keystore 目录
+          mkdir -p ../keystore
+          # 这里你需要提供实际的 keystore 文件或从 secrets 中恢复
 
       - name: Sign APK
         id: sign_apk
