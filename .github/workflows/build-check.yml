@@ -1,4 +1,4 @@
-name: Build Check with Debug
+name: Android Build Check
 
 on:
   workflow_dispatch:
@@ -23,19 +23,13 @@ jobs:
           distribution: 'temurin'
           cache: gradle
       
-      - name: Gradle Caching
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
       
       - name: Create local.properties
         run: |
           cat << EOF > local.properties
+          sdk.dir=$ANDROID_HOME
           MAPS_API_KEY=${{ secrets.MAPS_API_KEY }}
           MAPS_SAFE_CODE=${{ secrets.MAPS_SAFE_CODE }}
           EOF
@@ -43,20 +37,18 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       
-      # 显示 Gradle 版本和任务
-      - name: List Gradle tasks
-        run: ./gradlew tasks --no-daemon
+      - name: Clean and build
+        run: |
+          ./gradlew --stop || true
+          ./gradlew clean
+          ./gradlew build --no-daemon --stacktrace --no-configuration-cache
       
-      # 尝试编译
-      - name: Try to compile
-        run: ./gradlew compileDebugJavaWithJavac --no-daemon --stacktrace
-        continue-on-error: true
-      
-      # 运行测试（会暴露具体失败原因）
-      - name: Run tests
-        run: ./gradlew test --no-daemon --stacktrace --info
-      
-      # 如果测试通过，再尝试完整构建
-      - name: Full build
-        if: success()
-        run: ./gradlew build --no-daemon --stacktrace
+      - name: Upload build reports
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-failure-reports
+          path: |
+            **/build/reports/
+            **/build/android-profile/
+          retention-days: 30
